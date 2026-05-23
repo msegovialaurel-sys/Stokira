@@ -8,7 +8,7 @@
   <title>Stokira</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <style>
     :root{
       --primary:#185FA5;--primary-dark:#0C447C;
@@ -128,6 +128,8 @@
 
     /* SCANNER MODAL */
     .scanner-overlay{display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;overflow:hidden;}
+    #scanner-video video{width:100%!important;height:100%!important;object-fit:cover!important;display:block!important;}
+    #scanner-video canvas{display:none!important;}
     .scanner-overlay.open{display:flex;}
     .scanner-header{display:flex;align-items:center;justify-content:space-between;padding:16px;background:rgba(0,0,0,0.7);}
     .scanner-title{color:#fff;font-size:16px;font-weight:600;}
@@ -445,8 +447,8 @@
     <span class="scanner-title">📷 Escanear código de barras</span>
     <button class="scanner-close" onclick="closeScanner()">×</button>
   </div>
-  <div style="position:relative;flex:1;overflow:hidden;min-height:200px;">
-    <video id="scanner-video" autoplay playsinline muted webkit-playsinline style="width:100%;height:100%;object-fit:cover;display:block;background:#000;"></video>
+  <div style="position:relative;flex:1;overflow:hidden;min-height:200px;background:#000;">
+    <div id="scanner-video" style="width:100%;height:100%;"></div>
     <div class="scanner-aim"></div>
   </div>
   <div class="scanner-hint">Apunta la cámara al código de barras</div>
@@ -839,8 +841,8 @@ function resetUpload(){
   importData=[];
 }
 
-// ── SCANNER (ZXing decodeFromVideoElement — Safari compatible) ──
-var scannerTarget=null, scannerStream=null, scannerActive=false, zxingReader=null;
+// ── SCANNER (QuaggaJS — probado en iPhone/Safari) ──
+var scannerTarget=null, scannerActive=false;
 
 function setHint(msg){var el=document.getElementById('scanner-hint');if(el)el.textContent=msg;}
 
@@ -851,82 +853,54 @@ function openScanner(target){
   document.getElementById('manual-barcode').value='';
   setHint('Iniciando camara...');
 
-  navigator.mediaDevices.getUserMedia({
-    video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}
-  }).then(function(stream){
-    scannerStream=stream;
-    var video=document.getElementById('scanner-video');
-    video.srcObject=stream;
-    video.onloadedmetadata=function(){
-      video.play().then(function(){
-        setHint('Apunta el codigo al recuadro y mantén firme');
-        startZxing(video);
-      }).catch(function(e){setHint('Error video: '+e.message);});
-    };
-  }).catch(function(e){
-    setHint('Sin acceso a camara. Usa el campo manual.');
-  });
-}
-
-function startZxing(video){
-  if(!scannerActive) return;
-  var hints=new Map();
-  var formats=[
-    ZXing.BarcodeFormat.EAN_13,
-    ZXing.BarcodeFormat.EAN_8,
-    ZXing.BarcodeFormat.CODE_128,
-    ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.UPC_A,
-    ZXing.BarcodeFormat.UPC_E,
-    ZXing.BarcodeFormat.QR_CODE
-  ];
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-
-  var reader=new ZXing.MultiFormatReader();
-  reader.setHints(hints);
-  zxingReader=reader;
-
-  var canvas=document.createElement('canvas');
-  var ctx=canvas.getContext('2d',{willReadFrequently:true});
-  var lastAttempt=0;
-
-  function tick(now){
-    if(!scannerActive) return;
-    // Intentar cada 150ms para no saturar el CPU
-    if(now-lastAttempt > 150){
-      lastAttempt=now;
-      if(video.readyState>=2 && video.videoWidth>0){
-        canvas.width=video.videoWidth;
-        canvas.height=video.videoHeight;
-        ctx.drawImage(video,0,0);
-        try{
-          var imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
-          var src=new ZXing.RGBLuminanceSource(imageData.data,canvas.width,canvas.height);
-          var bmp=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
-          var result=reader.decode(bmp);
-          if(result){
-            var code=result.getText();
-            closeScanner();
-            handleBarcode(code);
-            return;
-          }
-        } catch(e){
-          // NotFoundException es normal — sigue intentando
-        }
+  Quagga.init({
+    inputStream:{
+      name:'Live',
+      type:'LiveStream',
+      target:document.getElementById('scanner-video'),
+      constraints:{
+        facingMode:'environment',
+        width:{min:640,ideal:1280,max:1920},
+        height:{min:480,ideal:720,max:1080}
       }
+    },
+    locator:{patchSize:'medium',halfSample:true},
+    numOfWorkers:0,
+    frequency:10,
+    decoder:{
+      readers:[
+        'ean_reader',
+        'ean_8_reader',
+        'code_128_reader',
+        'code_39_reader',
+        'upc_reader',
+        'upc_e_reader'
+      ],
+      multiple:false
+    },
+    locate:true
+  }, function(err){
+    if(err){
+      setHint('Error: '+err+'. Usa el campo manual.');
+      return;
     }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+    Quagga.start();
+    setHint('Apunta la camara al codigo de barras');
+  });
+
+  Quagga.onDetected(function(result){
+    if(!scannerActive) return;
+    var code=result.codeResult.code;
+    if(code){
+      closeScanner();
+      handleBarcode(code);
+    }
+  });
 }
 
 function closeScanner(){
   scannerActive=false;
-  zxingReader=null;
-  if(scannerStream){scannerStream.getTracks().forEach(function(t){t.stop();});scannerStream=null;}
-  var video=document.getElementById('scanner-video');
-  if(video){video.srcObject=null;}
+  try{Quagga.offDetected();Quagga.stop();}catch(e){}
   document.getElementById('scanner-overlay').classList.remove('open');
 }
 
