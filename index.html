@@ -127,7 +127,7 @@
     .drop-stock-out{font-size:12px;color:#c0392b;}
 
     /* SCANNER MODAL */
-    .scanner-overlay{display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;}
+    .scanner-overlay{display:none;position:fixed;inset:0;background:#000;z-index:500;flex-direction:column;overflow:hidden;}
     .scanner-overlay.open{display:flex;}
     .scanner-header{display:flex;align-items:center;justify-content:space-between;padding:16px;background:rgba(0,0,0,0.7);}
     .scanner-title{color:#fff;font-size:16px;font-weight:600;}
@@ -445,8 +445,8 @@
     <span class="scanner-title">📷 Escanear código de barras</span>
     <button class="scanner-close" onclick="closeScanner()">×</button>
   </div>
-  <div style="position:relative;flex:1;overflow:hidden;">
-    <video id="scanner-video" autoplay playsinline muted></video>
+  <div style="position:relative;flex:1;overflow:hidden;min-height:200px;">
+    <video id="scanner-video" autoplay playsinline muted webkit-playsinline style="width:100%;height:100%;object-fit:cover;display:block;background:#000;"></video>
     <div class="scanner-aim"></div>
   </div>
   <div class="scanner-hint">Apunta la cámara al código de barras</div>
@@ -839,52 +839,89 @@ function resetUpload(){
   importData=[];
 }
 
-// ── SCANNER (ZXing — compatible iPhone/Safari) ──
-var scannerTarget=null, zxingReader=null, scannerActive=false;
+// ── SCANNER (getUserMedia directo — compatible iPhone/Safari) ──
+var scannerTarget=null, scannerStream=null, scannerActive=false, scannerAnimFrame=null;
 
 function openScanner(target){
   scannerTarget=target;
   scannerActive=true;
   document.getElementById('scanner-overlay').classList.add('open');
   document.getElementById('manual-barcode').value='';
-  document.getElementById('scanner-hint').textContent='Iniciando camara...';
+  setHint('Iniciando camara...');
+
+  var constraints={
+    video:{
+      facingMode:{ideal:'environment'},
+      width:{ideal:1280},
+      height:{ideal:720}
+    }
+  };
+
+  navigator.mediaDevices.getUserMedia(constraints)
+    .then(function(stream){
+      scannerStream=stream;
+      var video=document.getElementById('scanner-video');
+      video.srcObject=stream;
+      video.setAttribute('playsinline','');
+      video.setAttribute('autoplay','');
+      video.setAttribute('muted','');
+      video.play().then(function(){
+        setHint('Apunta al codigo de barras');
+        startDecoding(video);
+      }).catch(function(e){
+        setHint('Error al iniciar video: '+e.message);
+      });
+    })
+    .catch(function(e){
+      setHint('Sin acceso a camara. Usa el campo manual abajo.');
+    });
+}
+
+function setHint(msg){
+  var el=document.getElementById('scanner-hint');
+  if(el) el.textContent=msg;
+}
+
+function startDecoding(video){
+  if(!scannerActive) return;
   try{
     var codeReader=new ZXing.BrowserMultiFormatReader();
-    zxingReader=codeReader;
-    var video=document.getElementById('scanner-video');
-    codeReader.listVideoInputDevices().then(function(devices){
-      if(!devices||devices.length===0){
-        document.getElementById('scanner-hint').textContent='No se encontro camara. Usa el campo manual.';
-        return;
+    var canvas=document.createElement('canvas');
+    var ctx=canvas.getContext('2d');
+
+    function tick(){
+      if(!scannerActive) return;
+      if(video.readyState===video.HAVE_ENOUGH_DATA){
+        canvas.width=video.videoWidth;
+        canvas.height=video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        var imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+        var luminanceSource=new ZXing.RGBLuminanceSource(imageData.data,canvas.width,canvas.height);
+        var binaryBitmap=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+        try{
+          var result=codeReader.decodeBitmap(binaryBitmap);
+          if(result){
+            var code=result.getText();
+            closeScanner();
+            handleBarcode(code);
+            return;
+          }
+        }catch(e){}
       }
-      var deviceId=null;
-      for(var i=0;i<devices.length;i++){
-        var label=(devices[i].label||'').toLowerCase();
-        if(label.includes('back')||label.includes('rear')||label.includes('environment')||label.includes('trasera')){
-          deviceId=devices[i].deviceId; break;
-        }
-      }
-      if(!deviceId) deviceId=devices[devices.length>1?devices.length-1:0].deviceId;
-      document.getElementById('scanner-hint').textContent='Apunta al codigo de barras — manten firme';
-      codeReader.decodeFromVideoDevice(deviceId, video, function(result, err){
-        if(!scannerActive) return;
-        if(result){
-          var code=result.getText();
-          closeScanner();
-          handleBarcode(code);
-        }
-      });
-    }).catch(function(e){
-      document.getElementById('scanner-hint').textContent='Error de camara. Usa el campo manual.';
-    });
+      scannerAnimFrame=requestAnimationFrame(tick);
+    }
+    tick();
   } catch(e){
-    document.getElementById('scanner-hint').textContent='Scanner no disponible. Usa el campo manual.';
+    setHint('Error de decodificacion. Usa el campo manual.');
   }
 }
 
 function closeScanner(){
   scannerActive=false;
-  if(zxingReader){try{zxingReader.reset();}catch(e){} zxingReader=null;}
+  if(scannerAnimFrame){cancelAnimationFrame(scannerAnimFrame);scannerAnimFrame=null;}
+  if(scannerStream){scannerStream.getTracks().forEach(function(t){t.stop();});scannerStream=null;}
+  var video=document.getElementById('scanner-video');
+  if(video){video.srcObject=null;}
   document.getElementById('scanner-overlay').classList.remove('open');
 }
 
