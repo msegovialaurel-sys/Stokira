@@ -1031,13 +1031,29 @@ function renderHistory(){
       '<button class="btn-danger-sm" onclick="deleteSale('+s.id+')">Eliminar</button></div>';
   }).join('');
 }
-async function deleteSale(id){if(!confirm('¿Eliminar esta venta?'))return;await sb.from('ventas').delete().eq('id',id).eq('user_id',currentUser.id);await loadSales();renderHistory();showToast('Venta eliminada');}
+async function anularVenta(id){
+  if(!confirm('¿Anular esta venta? Se devolverá el stock al inventario.'))return;
+  var sale=sales.find(function(s){return s.id===id;});
+  if(!sale||sale.anulada){showToast('Esta venta ya está anulada');return;}
+  // Devolver stock
+  var items=typeof sale.items==='string'?JSON.parse(sale.items):sale.items;
+  var updates=items.map(function(c){
+    var p=products.find(function(x){return x.id===c.pid;});
+    var newStock=(p?p.stock:0)+c.qty;
+    return sb.from('productos').update({stock:newStock}).eq('id',c.pid).eq('user_id',currentUser.id);
+  });
+  await Promise.all(updates);
+  // Marcar como anulada
+  await sb.from('ventas').update({anulada:true}).eq('id',id).eq('user_id',currentUser.id);
+  await loadProducts();await loadSales();renderHistory();
+  showToast('Venta anulada — stock devuelto ✓');
+}
 function renderPos(){renderCart();renderHistory();}
 
 // ── RESULTADOS ──
 function setErPeriod(p,btn){erPeriod=p;document.querySelectorAll('#page-er .period-btn').forEach(function(b){b.classList.remove('active');});btn.classList.add('active');renderEr();}
 function renderEr(){
-  var list=filteredSales(erPeriod);
+  var list=filteredSales(erPeriod).filter(function(s){return !s.anulada;});
   var ingresos=list.reduce(function(a,s){return a+s.total;},0);
   var costos=list.reduce(function(a,s){return a+s.costo;},0);
   var utilidad=ingresos-costos,margen=ingresos>0?Math.round(utilidad/ingresos*100):0;
