@@ -1011,11 +1011,12 @@ function filteredSales(per){
 }
 function renderHistory(){
   var list=filteredSales(period);
-  var ing=list.reduce(function(a,s){return a+s.total;},0);
-  var gan=list.reduce(function(a,s){return a+s.ganancia;},0);
+  var activas=list.filter(function(s){return !s.anulada;});
+  var ing=activas.reduce(function(a,s){return a+s.total;},0);
+  var gan=activas.reduce(function(a,s){return a+s.ganancia;},0);
   var mg=ing>0?Math.round(gan/ing*100):0;
   document.getElementById('pos-metrics').innerHTML=
-    '<div class="metric-box"><div class="metric-val">'+list.length+'</div><div class="metric-lbl">Ventas</div></div>'+
+    '<div class="metric-box"><div class="metric-val">'+activas.length+'</div><div class="metric-lbl">Ventas</div></div>'+
     '<div class="metric-box"><div class="metric-val blue">'+fmt(ing)+'</div><div class="metric-lbl">Ingresos</div></div>'+
     '<div class="metric-box"><div class="metric-val green">'+fmt(gan)+'</div><div class="metric-lbl">Ganancia</div></div>'+
     '<div class="metric-box"><div class="metric-val">'+mg+'%</div><div class="metric-lbl">Margen</div></div>';
@@ -1025,10 +1026,30 @@ function renderHistory(){
     var items=typeof s.items==='string'?JSON.parse(s.items):s.items;
     var mg2=s.total>0?Math.round(s.ganancia/s.total*100):0;
     var mp=s.metodo_pago||'efectivo';
-    return '<div class="sale-card"><div class="sale-card-header"><div><div class="sale-id">'+s.sale_id+'</div><div class="sale-date">'+fmtDate(s.ts)+'</div></div>'+
-      '<div style="text-align:right;"><div class="sale-total">'+fmt(s.total)+'</div><div class="sale-profit">+'+fmt(s.ganancia)+' ('+mg2+'%)</div></div></div>'+
-      '<div style="margin-bottom:6px;"><span class="pill '+payPillClass(mp)+'">'+payLabel(mp)+'</span>'+items.map(function(c){return '<span class="pill">'+c.qty+' × '+c.nombre+'</span>';}).join('')+'</div>'+
-      '<button class="btn-danger-sm" onclick="deleteSale('+s.id+')">Eliminar</button></div>';
+    var anulada=!!s.anulada;
+    var cardOpacity=anulada?'opacity:.55;':'';
+    var tachar=anulada?'text-decoration:line-through;color:var(--text-3);':'';
+    return '<div class="sale-card" style="'+cardOpacity+'">'+
+      '<div class="sale-card-header">'+
+        '<div>'+
+          '<div class="sale-id" style="'+tachar+'">'+s.sale_id+'</div>'+
+          '<div class="sale-date">'+fmtDate(s.ts)+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;">'+
+          '<div class="sale-total" style="'+tachar+'">'+fmt(s.total)+'</div>'+
+          (!anulada?'<div class="sale-profit">+'+fmt(s.ganancia)+' ('+mg2+'%)</div>':'')+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-bottom:8px;">'+
+        (anulada?'<span class="pill" style="background:#FCEBEB;color:#791F1F;border-color:#f5a5a5;">🚫 Anulada</span>':'')+
+        '<span class="pill '+payPillClass(mp)+'">'+payLabel(mp)+'</span>'+
+        items.map(function(c){return '<span class="pill" style="'+tachar+'">'+c.qty+' × '+c.nombre+'</span>';}).join('')+
+      '</div>'+
+      (!anulada
+        ?'<button class="btn-danger-sm" onclick="anularVenta('+s.id+')">Anular venta</button>'
+        :'<span style="font-size:12px;color:var(--text-3);">Stock devuelto al inventario</span>'
+      )+
+    '</div>';
   }).join('');
 }
 async function anularVenta(id){
