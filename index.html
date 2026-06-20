@@ -279,6 +279,18 @@
     .section-label{font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
     .toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:#222;color:#fff;font-size:14px;padding:10px 20px;border-radius:20px;z-index:300;display:none;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,0.2);}
     .toast.show{display:block;}
+    .install-banner{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e0e0e0;padding:12px 16px 28px;z-index:400;display:none;box-shadow:0 -4px 20px rgba(0,0,0,0.1);}
+    .install-banner.show{display:block;}
+    .install-banner-inner{display:flex;align-items:center;gap:12px;}
+    .install-icon{width:48px;height:48px;border-radius:12px;background:#185FA5;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;}
+    .install-info{flex:1;}
+    .install-title{font-size:15px;font-weight:600;color:#1a1a1a;}
+    .install-sub{font-size:12px;color:#888;margin-top:2px;}
+    .install-btn{background:#185FA5;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;flex-shrink:0;}
+    .install-close{position:absolute;top:10px;right:14px;background:none;border:none;font-size:20px;color:#888;cursor:pointer;padding:0;}
+    .install-steps{margin-top:12px;background:#f5f5f5;border-radius:8px;padding:10px 12px;}
+    .install-step{display:flex;align-items:center;gap:8px;font-size:13px;color:#555;padding:4px 0;}
+    .install-step-num{width:20px;height:20px;border-radius:50%;background:#185FA5;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
     .tab-row{display:flex;background:var(--bg);border-radius:var(--radius-sm);padding:3px;margin-bottom:14px;}
     .tab-opt{flex:1;text-align:center;padding:7px;font-size:13px;font-weight:500;border-radius:5px;cursor:pointer;color:var(--text-3);border:none;background:none;}
     .tab-opt.active{background:#fff;color:var(--primary);box-shadow:0 1px 4px rgba(0,0,0,0.1);}
@@ -1127,6 +1139,24 @@ document.querySelectorAll('.modal-overlay').forEach(function(m){m.addEventListen
 // ── INIT ──
 checkSession();
 </script>
+  <!-- BANNER INSTALACIÓN PWA -->
+  <div class="install-banner" id="install-banner">
+    <button class="install-close" onclick="closeBanner()">×</button>
+    <div class="install-banner-inner">
+      <div class="install-icon">📦</div>
+      <div class="install-info">
+        <div class="install-title">Instalar Stokira</div>
+        <div class="install-sub">Agrégala a tu pantalla de inicio</div>
+      </div>
+      <button class="install-btn" id="install-btn-action" onclick="doInstall()">Instalar</button>
+    </div>
+    <div class="install-steps" id="install-steps-ios" style="display:none;">
+      <div class="install-step"><div class="install-step-num">1</div>Toca el botón <strong>⬆️</strong> en Safari</div>
+      <div class="install-step"><div class="install-step-num">2</div>Baja y toca <strong>"Añadir a pantalla de inicio"</strong></div>
+      <div class="install-step"><div class="install-step-num">3</div>Toca <strong>"Añadir"</strong> para confirmar</div>
+    </div>
+  </div>
+
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
@@ -1135,6 +1165,69 @@ checkSession();
           .catch(function(err) { console.log('SW error:', err); });
       });
     }
+
+    // ── PWA INSTALL BANNER ──
+    var deferredPrompt = null;
+    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    var isInStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+
+    // Android: capturar evento beforeinstallprompt
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (!isInStandaloneMode && !localStorage.getItem('pwa-banner-dismissed')) {
+        showBanner('android');
+      }
+    });
+
+    // iOS: mostrar instrucciones manuales
+    window.addEventListener('load', function() {
+      if (isIOS && !isInStandaloneMode && !localStorage.getItem('pwa-banner-dismissed')) {
+        setTimeout(function() { showBanner('ios'); }, 2000);
+      }
+    });
+
+    function showBanner(platform) {
+      var banner = document.getElementById('install-banner');
+      var stepsIOS = document.getElementById('install-steps-ios');
+      var btn = document.getElementById('install-btn-action');
+      if (platform === 'ios') {
+        btn.textContent = 'Ver cómo';
+        stepsIOS.style.display = 'block';
+      } else {
+        btn.textContent = 'Instalar';
+        stepsIOS.style.display = 'none';
+      }
+      banner.classList.add('show');
+    }
+
+    function doInstall() {
+      if (deferredPrompt) {
+        // Android: instalar directamente
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function(result) {
+          if (result.outcome === 'accepted') {
+            closeBanner();
+          }
+          deferredPrompt = null;
+        });
+      } else if (isIOS) {
+        // iOS: toggle instrucciones
+        var steps = document.getElementById('install-steps-ios');
+        steps.style.display = steps.style.display === 'none' ? 'block' : 'none';
+      }
+    }
+
+    function closeBanner() {
+      document.getElementById('install-banner').classList.remove('show');
+      localStorage.setItem('pwa-banner-dismissed', '1');
+    }
+
+    // Si ya está instalada como PWA, no mostrar banner
+    window.addEventListener('appinstalled', function() {
+      closeBanner();
+      console.log('Stokira instalada como PWA');
+    });
   </script>
 </body>
 </html>
